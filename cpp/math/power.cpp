@@ -1,4 +1,3 @@
-#include "power_ll.h"
 
 // Fast Power Algorithm: (Base ^ Exponent) % Modular
 long long power_ll(long long base_, long long exponent_, long long modular_) {
