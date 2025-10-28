@@ -54,8 +54,8 @@ extern "C" void replace_char_sse(char* array, size_t len, char target, char dest
     if (!array || len <= 0) return;
     if (target == dest) return;
 
-    __m128i target_ = _mm_set1_epi8(target);
-    __m128i dest_   = _mm_set1_epi8(dest);
+    const __m128i target_ = _mm_set1_epi8(target);
+    const __m128i dest_   = _mm_set1_epi8(dest);
 
     const size_t batch = sizeof(__m128i) / sizeof(char);  // 16
     const int has_sse4_1 = check_SSE4_1();
@@ -63,8 +63,8 @@ extern "C" void replace_char_sse(char* array, size_t len, char target, char dest
     size_t i = 0;
     for (; i + batch <= len; i += batch)
     {
-        __m128i data = _mm_loadu_si128((__m128i*)(array + i));
-        __m128i mask = _mm_cmpeq_epi8(data, target_);
+        __m128i data  = _mm_loadu_si128((__m128i*)(array + i));
+        __m128i mask  = _mm_cmpeq_epi8(data, target_);
         __m128i blend = has_sse4_1
             ? _mm_blendv_epi8(data, dest_, mask)
             : _mm_or_si128(_mm_and_si128(mask, dest_), _mm_andnot_si128(mask, data));
@@ -82,11 +82,11 @@ extern "C" void replace_char_sse(char* array, size_t len, char target, char dest
 */
 extern "C" void replace_short_sse(short* array, size_t len, short target, short dest)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
     if (target == dest) return;
 
-    __m128i target_ = _mm_set1_epi16(target);
-    __m128i dest_   = _mm_set1_epi16(dest);
+    const __m128i target_ = _mm_set1_epi16(target);
+    const __m128i dest_   = _mm_set1_epi16(dest);
 
     const size_t batch = sizeof(__m128i) / sizeof(short);  // 8
     const int has_sse4_1 = check_SSE4_1();
@@ -113,11 +113,11 @@ extern "C" void replace_short_sse(short* array, size_t len, short target, short 
 */
 extern "C" void replace_int_sse(int* array, size_t len, int target, int dest)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
     if (target == dest) return;
 
-    __m128i target_ = _mm_set1_epi32(target);
-    __m128i dest_   = _mm_set1_epi32(dest);
+    const __m128i target_ = _mm_set1_epi32(target);
+    const __m128i dest_   = _mm_set1_epi32(dest);
 
     const size_t batch = sizeof(__m128i) / sizeof(int);  // 4
     const int has_sse4_1 = check_SSE4_1();
@@ -144,12 +144,12 @@ extern "C" void replace_int_sse(int* array, size_t len, int target, int dest)
 */
 extern "C" void replace_longlong_sse(long long* array, size_t len, long long target, long long dest)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
     if (target == dest) return;
     if (!check_SSE4_1()) return;  // SSE4.1 work only
 
-    __m128i target_ = _mm_set1_epi64x(target);
-    __m128i dest_ = _mm_set1_epi64x(dest);
+    const __m128i target_ = _mm_set1_epi64x(target);
+    const __m128i dest_   = _mm_set1_epi64x(dest);
 
     const size_t batch = sizeof(__m128i) / sizeof(long long);  // 2
 
@@ -173,7 +173,7 @@ extern "C" void replace_longlong_sse(long long* array, size_t len, long long tar
 */
 extern "C" void replace_float_sse(float* array, size_t len, float target, float dest)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
     if (target == dest) return;
 
     const __m128 target_ = _mm_set1_ps(target);
@@ -206,7 +206,7 @@ extern "C" void replace_float_sse(float* array, size_t len, float target, float 
 extern "C" void replace_float_epsilon_sse(
     float* array, size_t len, float target, float dest, float eps)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
 
     const __m128 target_ = _mm_set1_ps(target);
     const __m128 dest_   = _mm_set1_ps(dest);
@@ -239,7 +239,7 @@ extern "C" void replace_float_epsilon_sse(
 */
 extern "C" void replace_double_sse(double* array, size_t len, double target, double dest)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
     if (target == dest) return;
 
     const __m128d target_ = _mm_set1_pd(target);
@@ -272,7 +272,7 @@ extern "C" void replace_double_sse(double* array, size_t len, double target, dou
 extern "C" void replace_double_epsilon_sse(
     double* array, size_t len, double target, double dest, double eps)
 {
-    if (!array || len == 0) return;
+    if (!array || len <= 0) return;
 
     const __m128d target_ = _mm_set1_pd(target);
     const __m128d dest_   = _mm_set1_pd(dest);
@@ -284,9 +284,9 @@ extern "C" void replace_double_epsilon_sse(
     size_t i = 0;
     for (; i + batch <= len; i += batch)
     {
-        __m128d data = _mm_loadu_pd(array + i);
-        __m128d diff = _mm_andnot_pd(_mm_set1_pd(-0.0), _mm_sub_pd(data, target_));   // |data - target|, remove sign bit
-        __m128d mask = _mm_cmple_pd(diff, eps_);  // diff <= eps, mask = true
+        __m128d data  = _mm_loadu_pd(array + i);
+        __m128d diff  = _mm_andnot_pd(_mm_set1_pd(-0.0), _mm_sub_pd(data, target_));  // |data - target|, remove sign bit
+        __m128d mask  = _mm_cmple_pd(diff, eps_);  // diff <= eps, mask = true
         __m128d blend = has_sse4_1
             ? _mm_blendv_pd(data, dest_, mask)
             : _mm_or_pd(_mm_and_pd(mask, dest_), _mm_andnot_pd(mask, data));
@@ -306,5 +306,4 @@ extern "C" void replace_double_epsilon_sse(
 * __m128i _mm_cmpeq_epi64(__m128i, __m128i);
 * __m128 _mm_blendv_ps(__m128, __m128, __m128);
 * __m128d _mm_blendv_pd(__m128d, __m128d, __m128d);
-
 */
