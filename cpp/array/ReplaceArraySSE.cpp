@@ -306,4 +306,5 @@ extern "C" void replace_double_epsilon_sse(
 * __m128i _mm_cmpeq_epi64(__m128i, __m128i);
 * __m128 _mm_blendv_ps(__m128, __m128, __m128);
 * __m128d _mm_blendv_pd(__m128d, __m128d, __m128d);
+
 */
