@@ -17,6 +17,7 @@
 
 
 #include "ReplaceArrayAVX.h"
+#include <stdint.h>
 
 #ifdef _MSC_VER
 #   include <intrin.h>
@@ -90,7 +91,7 @@ static int check_AVX_level()
 /*
 * Replace target characters to destination characters from string.
 */
-extern "C" int replace_char_avx(char* array, size_t len, char target, char dest)
+extern "C" int replace_char_avx(char* RESTRICT array, const size_t len, const char target, const char dest)
 {
     if (!array || len == 0) return 0;
     if (target == dest) return 0;
@@ -121,7 +122,7 @@ extern "C" int replace_char_avx(char* array, size_t len, char target, char dest)
 /*
 * Replace target short integers to destination short integers from short array.
 */
-extern "C" int replace_short_avx(short* array, size_t len, short target, short dest)
+extern "C" int replace_i16_avx(int16_t* RESTRICT array, const size_t len, const int16_t target, const int16_t dest)
 {
     if (!array || len == 0) return 0;
     if (target == dest) return 0;
@@ -129,7 +130,7 @@ extern "C" int replace_short_avx(short* array, size_t len, short target, short d
 
     const __m256i target_ = _mm256_set1_epi16(target);
     const __m256i dest_   = _mm256_set1_epi16(dest);
-    const size_t  batch   = sizeof(__m256i) / sizeof(short);  // 16
+    const size_t  batch   = sizeof(__m256i) / sizeof(int16_t);  // 16
 
     size_t i = 0;
     for (; i + batch <= len; i += batch)
@@ -152,7 +153,7 @@ extern "C" int replace_short_avx(short* array, size_t len, short target, short d
 /*
 * Replace target integers to destination integers from int array.
 */
-extern "C" int replace_int_avx(int* array, size_t len, int target, int dest)
+extern "C" int replace_i32_avx(int32_t* RESTRICT array, const size_t len, const int32_t target, const int32_t dest)
 {
     if (!array || len == 0) return 0;
     if (target == dest) return 0;
@@ -160,7 +161,7 @@ extern "C" int replace_int_avx(int* array, size_t len, int target, int dest)
 
     const __m256i target_ = _mm256_set1_epi32(target);
     const __m256i dest_   = _mm256_set1_epi32(dest);
-    const size_t  batch   = sizeof(__m256i) / sizeof(int);  // 8
+    const size_t  batch   = sizeof(__m256i) / sizeof(int32_t);  // 8
 
     size_t i = 0;
     for (; i + batch <= len; i += batch)
@@ -183,7 +184,7 @@ extern "C" int replace_int_avx(int* array, size_t len, int target, int dest)
 /*
 * Replace target 64-bit integers to destination 64-bit integers from long long array.
 */
-extern "C" int replace_longlong_avx(long long* array, size_t len, long long target, long long dest)
+extern "C" int replace_i64_avx(int64_t* RESTRICT array, const size_t len, const int64_t target, const int64_t dest)
 {
     if (!array || len == 0) return 0;
     if (target == dest) return 0;
@@ -191,7 +192,7 @@ extern "C" int replace_longlong_avx(long long* array, size_t len, long long targ
 
     const __m256i target_ = _mm256_set1_epi64x(target);
     const __m256i dest_   = _mm256_set1_epi64x(dest);
-    const size_t  batch   = sizeof(__m256i) / sizeof(long long);  // 4
+    const size_t  batch   = sizeof(__m256i) / sizeof(int64_t);  // 4
 
     size_t i = 0;
     for (; i + batch <= len; i += batch)
@@ -214,7 +215,7 @@ extern "C" int replace_longlong_avx(long long* array, size_t len, long long targ
 /*
 * Replace target floats to destination floats from float array.
 */
-extern "C" int replace_float_avx(float* array, size_t len, float target, float dest)
+extern "C" int replace_float_avx(float* RESTRICT array, const size_t len, const float target, const float dest)
 {
     if (!array || len == 0) return 0;
     if (target == dest) return 0;
@@ -247,7 +248,7 @@ extern "C" int replace_float_avx(float* array, size_t len, float target, float d
 * Epsilon range version.
 */
 extern "C" int replace_float_epsilon_avx(
-    float* array, size_t len, float target, float dest, float eps)
+    float* RESTRICT array, const size_t len, const float target, const float dest, const float eps)
 {
     if (!array || len == 0) return 0;
     if (check_AVX_level() < 1) return 0;
@@ -281,7 +282,7 @@ extern "C" int replace_float_epsilon_avx(
 /*
 * Replace target doubles to destination doubles from double array.
 */
-extern "C" int replace_double_avx(double* array, size_t len, double target, double dest)
+extern "C" int replace_double_avx(double* RESTRICT array, const size_t len, const double target, const double dest)
 {
     if (!array || len == 0) return 0;
     if (target == dest) return 0;
@@ -314,7 +315,7 @@ extern "C" int replace_double_avx(double* array, size_t len, double target, doub
 * Epsilon range version.
 */
 extern "C" int replace_double_epsilon_avx(
-    double* array, size_t len, double target, double dest, double eps)
+    double* RESTRICT array, size_t len, const double target, const double dest, const double eps)
 {
     if (!array || len == 0) return 0;
     if (check_AVX_level() < 1) return 0;
