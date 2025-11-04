@@ -6,17 +6,17 @@
 */
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-int check_SSE_level();
-int check_XOP_level();
-int check_FMA_level();
-int check_AVX_level();
-unsigned int check_AVX512();
-
-void init_SIMD_LEVEL();
+uint32_t check_SSE();
+uint32_t check_AMD();
+uint32_t check_AVX();
+uint32_t check_AVX512();
+uint64_t check_SIMD();
 
 #ifdef __cplusplus
 }
