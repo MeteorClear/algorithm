@@ -6,6 +6,7 @@
 *   Worst-case: O( (log n)^2 ) parallel time
 *    Best-case: O( (log n)^2 ) parallel time
 * Average-case: O( (log n)^2 ) parallel time
+*   Total work: O(n (log n)^2)
 * In-place(Algorithm but not implementation) sort
 * Unstable sort
 */
@@ -216,4 +217,5 @@ void bitonic_sort_avx(int32_t* arr, size_t len, int dir)
 * Result sorted array
 * [1, 2, 3, 4, 5, 6, 7, 8]
 */
+
 
