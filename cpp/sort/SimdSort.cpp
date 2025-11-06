@@ -139,10 +139,6 @@ namespace simd_sort {
                 rc += 8;
                 continue;
             }
-            if ((ml | mg) == 0x00) {
-                eq_count += 8;
-                continue;
-            }
             if (mg == 0x00) {
                 const MaskLut& LM = mask_lut(ml);
                 __m256i pack = _mm256_permutevar8x32_epi32(v, LM.idx);
