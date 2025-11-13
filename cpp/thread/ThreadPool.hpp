@@ -1,10 +1,17 @@
 /*
 * ThreadPool Class
-* is thread pool that uses a priority queue to manage tasks.
+* is thread pool that uses a priority queue to manage tasks. (header-only)
+* 
 * It created for easy multi-threading environment use.
 * By default, when a Task is pushed, an idle thread is automatically assigned and executed.
 * If necessary, you can be stopped or waited for the task to be completed.
-* Task should be function, the return value cannot be gotten
+* 
+* note:
+* This code uses std::result_of, which is deprecated since C++17 and may be removed in future C++ standards.
+* For C++17 and later, consider replacing it with std::invoke_result / std::invoke_result_t.
+* 
+* require:
+* C++11 or over, C++14 (recommand)
 * 
 * ref:
 * https://modoocode.com/285
@@ -19,6 +26,7 @@
 #include <atomic>
 #include <algorithm>
 #include <functional>
+#include <future>
 
 class ThreadPool {
 public:
@@ -28,8 +36,7 @@ public:
     static constexpr int DEFAULT_PRIORITY = 0;
 
     // Constructor
-    ThreadPool() : ThreadPool(std::thread::hardware_concurrency()) {}
-    explicit ThreadPool(size_t threadCount) {
+    explicit ThreadPool(size_t threadCount = 0) {
         size_t hw = std::thread::hardware_concurrency();
         threadCount_ = (threadCount == 0 || threadCount > hw) ? hw : threadCount;
         threadCount_ = std::max(threadCount_, 1llu);
@@ -49,24 +56,56 @@ public:
 
     // -------------------------------- Methods --------------------------------
 
-    // Enqueue the task
-    void enqueue(Work work) {
-        enqueue(std::move(work), DEFAULT_PRIORITY);
+    // Enqueue void return task with priority
+    template<class F, class... Args,
+        typename std::enable_if<std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
+    void enqueue(int priority, F&& f, Args&&... args)
+    {
+        Work work_wrapper = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+
+        // Enqueue wrapped task into task queue
+        this->queueTask(priority, std::move(work_wrapper));
     }
 
-    // Enqueue the task with specified priority, higher int means higher priority
-    // example:
-    // enqueue(foo, 1);
-    void enqueue(Work work, int priority) {
-        {   // Lock
-            std::unique_lock<std::mutex> lock(queueMutex_);
-            taskQueue_.emplace(priority, std::move(work));
-        }   // Unlock
+    // Enqueue void return task
+    template<class F, class... Args,
+        typename std::enable_if<std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
+    void enqueue(F&& f, Args&&... args)
+    {
+        this->enqueue(DEFAULT_PRIORITY, std::forward<F>(f), std::forward<Args>(args)...);
+    }
 
-        // Notify one waiting worker
-        if (!pauseFlag_.load(std::memory_order_acquire)) {
-            queueCV_.notify_one();
-        }
+    // Enqueue future return task with priority
+    template<class F, class... Args,
+        typename std::enable_if<!std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
+    auto enqueue(int priority, F&& f, Args&&... args)
+        -> std::future<typename std::result_of<F(Args...)>::type>
+    {
+        using ResultType = typename std::result_of<F(Args...)>::type;
+
+        auto task = std::make_shared<std::packaged_task<ResultType()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+        );
+
+        std::future<ResultType> res = task->get_future();
+
+        Work work_wrapper = [task]() {
+            (*task)();
+            };
+
+        // Enqueue wrapped task into task queue
+        this->queueTask(priority, std::move(work_wrapper));
+
+        return res;
+    }
+
+    // Enqueue future return task
+    template<class F, class... Args,
+        typename std::enable_if<!std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
+    auto enqueue(F&& f, Args&&... args)
+        -> std::future<typename std::result_of<F(Args...)>::type>
+    {
+        return this->enqueue(DEFAULT_PRIORITY, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     // Wait until the queue is empty and all running tasks are complete
@@ -153,6 +192,25 @@ private:
         }
     };
 
+    // Enqueue the task with specific priority into task queue
+    inline void queueTask(int priority, Work work_wrapper) {
+        {   // Lock
+            std::unique_lock<std::mutex> lock(queueMutex_);
+
+            // shutdown status
+            if (stopFlag_.load(std::memory_order_acquire)) {
+                throw std::runtime_error("Cannot enqueue task: ThreadPool is shut down.");
+            }
+
+            taskQueue_.emplace(priority, std::move(work_wrapper));
+        }   // Unlock
+
+        // Notify one waiting worker
+        if (!pauseFlag_.load(std::memory_order_acquire)) {
+            queueCV_.notify_one();
+        }
+    }
+
     // Main loop for each worker thread
     void workerLoop() {
         while (true) {
@@ -174,15 +232,22 @@ private:
 
                 if (!taskQueue_.empty()) {
                     //work = std::move(taskQueue_.top().second);  // std::move const warning, taskQueue_.top().second is const Work& type
-                    work = taskQueue_.top().second;
+                    //work = taskQueue_.top().second;  // copy is heavy
+                    work = std::move(const_cast<Work&>(taskQueue_.top().second));
                     taskQueue_.pop();
-                }
-                else { continue; }
+                } else { continue; }
             }   // Unlock
 
-            // Execute the task
             runningTasks_.fetch_add(1, std::memory_order_relaxed);
-            work();
+
+            // Execute the task
+            try {
+                work();
+            } catch (const std::exception& e) {
+                std::cerr << "[ThreadPool]ERROR:Worker thread caught exception: " << e.what() << '\n';
+            } catch (...) {
+                std::cerr << "[ThreadPool]ERROR:Worker thread caught unknown exception." << '\n';
+            }
 
             {   // Lock
                 std::unique_lock<std::mutex> lock(queueMutex_);
@@ -216,8 +281,13 @@ private:
 
 /* Usage Example
 
-void simple_task(int id, double val) {
+void simple_task(int id, int val) {
     // some magic
+}
+
+int return_task(int a, int b) {
+    // some magic
+    return a + b;
 }
 
 int main() {
@@ -225,19 +295,25 @@ int main() {
     // You may call std::thread::hardware_concurrency() to check your system's maximum thread count.
     ThreadPool pool(4);
 
-    // Enqueue task default priority
-    // The Task signature is function<void()>
-    // To pass arguments to a task, wrap it with a lambda or std::bind
-    // auto bound_task = [i, j](){ simple_task(i, j); };    // basic way to parameter capture
-    // auto bound_task = std::bind(simple_task, i, j);      // or you can also use std::bind 
-    pool.enqueue([]{ simple_task(1, 2.5); });               // or use lambda (recommend)
-
-    // You can set task priority
-    pool.enqueue([]{ simple_task(3, 1.2); }, -5);           // Low priority (executed later)
-    pool.enqueue([]{ simple_task(7, 8.3); }, 8);            // High priority (executed earlier)
+    // You can set priority or not.
+    pool.enqueue(simple_task, 1, 2);            // Enqueue task default priority(0)
+    pool.enqueue(-5, simple_task, 3, 5);        // Low priority(-5) (executed later)
+    pool.enqueue(8, simple_task, 5, 11);        // High priority(8) (executed earlier)
 
     // Wait for all tasks to complete before proceeding
     pool.wait();
+
+    // If you need to get some return value, you can get it using std::future. (also can set priority)
+    std::future<int> task_result = pool.enqueue(return_task, 3, 5);
+    int result = task_result.get();             // You may get 8 int value(3 + 5)
+
+    // If you just want to stop thread running, you should use pool.pause();
+    pool.pause(); 
+    if (pool.isPaused()) pool.resume();
+
+    // This method all system terminate, you don't call enqueue
+    pool.shutdown();
+    pool.enqueue(simple_task, 1, 2);            // will throw std::runtime_error
 }
 
 */
