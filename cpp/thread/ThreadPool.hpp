@@ -39,7 +39,7 @@ public:
     explicit ThreadPool(size_t threadCount = 0) {
         size_t hw = std::thread::hardware_concurrency();
         threadCount_ = (threadCount == 0 || threadCount > hw) ? hw : threadCount;
-        threadCount_ = std::max(threadCount_, 1llu);
+        threadCount_ = std::max(threadCount_, size_t{1});
 
         threads_.resize(threadCount_);
         stopFlag_.store(false, std::memory_order_release);
@@ -56,28 +56,8 @@ public:
 
     // -------------------------------- Methods --------------------------------
 
-    // Enqueue void return task with priority
-    template<class F, class... Args,
-        typename std::enable_if<std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
-    void enqueue(int priority, F&& f, Args&&... args)
-    {
-        Work work_wrapper = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
-
-        // Enqueue wrapped task into task queue
-        this->queueTask(priority, std::move(work_wrapper));
-    }
-
-    // Enqueue void return task
-    template<class F, class... Args,
-        typename std::enable_if<std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
-    void enqueue(F&& f, Args&&... args)
-    {
-        this->enqueue(DEFAULT_PRIORITY, std::forward<F>(f), std::forward<Args>(args)...);
-    }
-
     // Enqueue future return task with priority
-    template<class F, class... Args,
-        typename std::enable_if<!std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
+    template<class F, class... Args>
     auto enqueue(int priority, F&& f, Args&&... args)
         -> std::future<typename std::result_of<F(Args...)>::type>
     {
@@ -100,8 +80,7 @@ public:
     }
 
     // Enqueue future return task
-    template<class F, class... Args,
-        typename std::enable_if<!std::is_void<typename std::result_of<F(Args...)>::type>::value, int>::type = 0>
+    template<class F, class... Args>
     auto enqueue(F&& f, Args&&... args)
         -> std::future<typename std::result_of<F(Args...)>::type>
     {
@@ -232,8 +211,8 @@ private:
 
                 if (!taskQueue_.empty()) {
                     //work = std::move(taskQueue_.top().second);  // std::move const warning, taskQueue_.top().second is const Work& type
-                    //work = taskQueue_.top().second;  // copy is heavy
-                    work = std::move(const_cast<Work&>(taskQueue_.top().second));
+                    work = taskQueue_.top().second;  // copy is heavy
+                    //work = std::move(const_cast<Work&>(taskQueue_.top().second));  // const_cast risk
                     taskQueue_.pop();
                 } else { continue; }
             }   // Unlock
@@ -305,6 +284,7 @@ int main() {
 
     // If you need to get some return value, you can get it using std::future. (also can set priority)
     std::future<int> task_result = pool.enqueue(return_task, 3, 5);
+    task_result.wait()                          // Optional, if you need to ensure task complete
     int result = task_result.get();             // You may get 8 int value(3 + 5)
 
     // If you just want to stop thread running, you should use pool.pause();
