@@ -8,9 +8,17 @@
 
 typedef int (*task_function_t)(void* arg);
 
+typedef struct TaskResult {
+    mtx_t result_mutex;
+    cnd_t result_cv;
+    int result_value;
+    volatile bool ready;
+} TaskResult_t;
+
 typedef struct Task {
     task_function_t function;
     void* arg;
+    TaskResult_t* result;
     struct Task* next;
 } Task_t;
 
@@ -36,7 +44,10 @@ extern "C" {
 #endif
 
 ThreadPool_t* threadpool_create(size_t threadCount);
-int threadpool_enqueue(ThreadPool_t* pool, task_function_t function, void* arg);
+TaskResult_t* threadpool_enqueue(ThreadPool_t* pool, task_function_t function, void* arg);
+
+int  taskresult_get(TaskResult_t* result);
+void taskresult_destroy(TaskResult_t* result);
 
 void threadpool_wait(ThreadPool_t* pool);
 void threadpool_pause(ThreadPool_t* pool);

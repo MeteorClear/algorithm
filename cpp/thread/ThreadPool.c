@@ -1,6 +1,9 @@
 #include "ThreadPool.h"
 
 static int worker_loop(void* arg);
+static TaskResult_t* taskresult_create();
+
+// ======================== Public Function ========================
 
 ThreadPool_t* threadpool_create(size_t threadCount) {
     ThreadPool_t* pool = (ThreadPool_t*)malloc(sizeof(ThreadPool_t));
@@ -64,32 +67,60 @@ ThreadPool_t* threadpool_create(size_t threadCount) {
     return pool;
 }
 
+void taskresult_destroy(TaskResult_t* result) {
+    if (result == NULL) return;
+    mtx_destroy(&result->result_mutex);
+    cnd_destroy(&result->result_cv);
+    free(result);
+}
 
-int threadpool_enqueue(ThreadPool_t* pool, task_function_t function, void* arg) {
-    if (function == NULL) return -1;
+int taskresult_get(TaskResult_t* result) {
+    if (result == NULL) return -1;
+
+    mtx_lock(&result->result_mutex);
+    while (!result->ready) {
+        cnd_wait(&result->result_cv, &result->result_mutex);
+    }
+    int value = result->result_value;
+    mtx_unlock(&result->result_mutex);
+
+    return value;
+}
+
+TaskResult_t* threadpool_enqueue(ThreadPool_t* pool, task_function_t function, void* arg) {
+    if (function == NULL) return NULL;
 
     Task_t* new_task = (Task_t*)malloc(sizeof(Task_t));
     if (new_task == NULL) {
         perror("Failed to allocate memory for new task");
-        return -1;
+        return NULL;
+    }
+
+    TaskResult_t* result = taskresult_create();
+    if (result == NULL) {
+        free(new_task);
+        return NULL;
     }
 
     new_task->function = function;
     new_task->arg = arg;
     new_task->next = NULL;
+    new_task->result = result;
 
     mtx_lock(&pool->queue_mutex);
     if (pool->stop_flag) {
         mtx_unlock(&pool->queue_mutex);
         free(new_task);
+        taskresult_destroy(result);
         fprintf(stderr, "Cannot enqueue task: ThreadPool is shut down.\n");
-        return -1;
+        return NULL;
     }
 
     if (pool->task_queue_tail == NULL) {
         pool->task_queue_head = new_task;
         pool->task_queue_tail = new_task;
-    } else {
+    }
+    else {
         pool->task_queue_tail->next = new_task;
         pool->task_queue_tail = new_task;
     }
@@ -100,7 +131,7 @@ int threadpool_enqueue(ThreadPool_t* pool, task_function_t function, void* arg) 
     }
     mtx_unlock(&pool->queue_mutex);
 
-    return 0;
+    return result;
 }
 
 void threadpool_wait(ThreadPool_t* pool) {
@@ -134,6 +165,9 @@ void threadpool_clear_queue(ThreadPool_t* pool) {
 
     while (current != NULL) {
         next = current->next;
+        if (current->result != NULL) {
+            taskresult_destroy(current->result);
+        }
         free(current);
         current = next;
     }
@@ -175,6 +209,26 @@ void threadpool_shutdown(ThreadPool_t* pool) {
     free(pool);
 }
 
+// ======================== Static Internal Function ========================
+
+static TaskResult_t* taskresult_create() {
+    TaskResult_t* result = (TaskResult_t*)malloc(sizeof(TaskResult_t));
+    if (result == NULL) {
+        perror("Failed to allocate memory for TaskResult");
+        return NULL;
+    }
+    if (mtx_init(&result->result_mutex, mtx_plain) != thrd_success ||
+        cnd_init(&result->result_cv) != thrd_success)
+    {
+        fprintf(stderr, "Error: Failed to initialize TaskResult primitives.\n");
+        free(result);
+        return NULL;
+    }
+    result->result_value = 0;
+    result->ready = false;
+    return result;
+}
+
 static int worker_loop(void* arg) {
     ThreadPool_t* pool = (ThreadPool_t*)arg;
 
@@ -208,7 +262,16 @@ static int worker_loop(void* arg) {
         mtx_unlock(&pool->queue_mutex);
 
         if (task != NULL) {
-            task->function(task->arg);
+            int result_value = task->function(task->arg);
+
+            if (task->result != NULL) {
+                mtx_lock(&task->result->result_mutex);
+                task->result->result_value = result_value;
+                task->result->ready = true;
+                cnd_signal(&task->result->result_cv);
+                mtx_unlock(&task->result->result_mutex);
+            }
+
             free(task);
 
             mtx_lock(&pool->queue_mutex);
