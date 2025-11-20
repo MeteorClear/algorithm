@@ -75,15 +75,15 @@ void taskresult_destroy(TaskResult_t* result) {
     free(result);
 }
 
-int taskresult_get(TaskResult_t* result) {
-    if (result == NULL) return -1;
+void* taskresult_get(TaskResult_t* result) {
+    if (result == NULL) return NULL;
 
     mtx_lock(&result->result_mutex);
     // Wait until the task is marked as ready
     while (!result->ready) {
         cnd_wait(&result->result_cv, &result->result_mutex);
     }
-    int value = result->result_value;
+    void* value = result->result_value;
     mtx_unlock(&result->result_mutex);
 
     return value;
@@ -175,7 +175,7 @@ void threadpool_clear_queue(ThreadPool_t* pool) {
 
         if (current->result != NULL) {
             mtx_lock(&current->result->result_mutex);
-            current->result->result_value = 0;
+            current->result->result_value = NULL;
             current->result->ready = true;
             cnd_signal(&current->result->result_cv);
             mtx_unlock(&current->result->result_mutex);
@@ -290,7 +290,7 @@ static int worker_loop(void* arg) {
 
         // Execute task outside the lock
         if (task != NULL) {
-            int result_value = task->function(task->arg);
+            void* result_value = task->function(task->arg);
 
             // Store result and notify waiting thread
             if (task->result != NULL) {

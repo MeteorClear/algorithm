@@ -1,3 +1,10 @@
+/*
+ * Thread Pool written in C
+ * is thread pool that uses a priority queue to manage tasks.
+ * 
+ * require:
+ * C11 or over
+ */
 #pragma once
 
 #ifndef C_THREADPOOL_H_INCLUDED
@@ -10,7 +17,7 @@
 /*
  * Defines the function prototype for tasks
  */
-typedef int (*task_function_t)(void* arg);
+typedef void* (*task_function_t)(void* arg);
 
 /*
  * Structure for representing the result of an asynchronous task
@@ -18,7 +25,7 @@ typedef int (*task_function_t)(void* arg);
 typedef struct TaskResult {
     mtx_t result_mutex;                 // Mutex to protect the result data
     cnd_t result_cv;                    // Condition variable to signal task completion
-    int result_value;                   // The return value of the executed task
+    void* result_value;                 // The return value of the executed task
     volatile bool ready;                // Flag indicating if the result is ready
 } TaskResult_t;
 
@@ -76,7 +83,7 @@ TaskResult_t* threadpool_enqueue(ThreadPool_t* pool, task_function_t function, v
  * result: The result object returned by threadpool_enqueue
  * return: The value returned by the task function
  */
-int  taskresult_get(TaskResult_t* result);
+void* taskresult_get(TaskResult_t* result);
 /*
  * Destroys the task result object and frees resources
  * result: The result object returned by threadpool_enqueue
@@ -130,9 +137,9 @@ typedef struct addArgs {  // define structure to wrap arguments (since tasks tak
     int b;
 } AddArgs_t;
 
-int wrapped_add(void* args) {  // create wrapper function
+void* wrapped_add(void* args) {  // create wrapper function
     AddArgs_t* arg = (AddArgs_t*)args;
-    return add(arg->a, arg->b);
+    return (void*)add(arg->a, arg->b);
 }
 
 int main() {
@@ -153,8 +160,8 @@ int main() {
 
     threadpool_wait(pool);  // wait for all tasks to complete (Optional but recommended for bulk processing)
 
-    int val1 = taskresult_get(res1);  // Retrieve results
-    int val2 = taskresult_get(res2);
+    int val1 = (int)taskresult_get(res1);  // Retrieve results
+    int val2 = (int)taskresult_get(res2);
 
     printf("10 + 20 = %d\n", val1);  // Output: 30
     printf("50 + 70 = %d\n", val2);  // Output: 120
