@@ -114,3 +114,54 @@ void threadpool_shutdown(ThreadPool_t* pool);
 #endif
 
 #endif  /* C_THREADPOOL_H_INCLUDED */
+
+/* // Usage Example
+
+#include <stdio.h>
+#include "ThreadPool.h"
+
+int add(int a, int b) {  // define example task
+    // some magic
+    return a + b;
+}
+
+typedef struct addArgs {  // define structure to wrap arguments (since tasks take void*)
+    int a;
+    int b;
+} AddArgs_t;
+
+int wrapped_add(void* args) {  // create wrapper function
+    AddArgs_t* arg = (AddArgs_t*)args;
+    return add(arg->a, arg->b);
+}
+
+int main() {
+    size_t thread_count = 2;
+    ThreadPool_t* pool = threadpool_create(thread_count);  // initialize threadPool with 2 threads
+    if (pool == NULL) return 1;
+
+    AddArgs_t args1 = { 10, 20 };  // prepare arguments
+    AddArgs_t args2 = { 50, 70 };
+
+    TaskResult_t* res1 = threadpool_enqueue(pool, wrapped_add, &args1);  // enqueue task, you need to wrap function or require dedicated function
+    TaskResult_t* res2 = threadpool_enqueue(pool, wrapped_add, &args2);
+    if (res1 == NULL || res2 == NULL) {
+        fprintf(stderr, "Failed to enqueue tasks\n");
+        threadpool_shutdown(pool);
+        return 1;
+    }
+
+    threadpool_wait(pool);  // wait for all tasks to complete (Optional but recommended for bulk processing)
+
+    int val1 = taskresult_get(res1);  // Retrieve results
+    int val2 = taskresult_get(res2);
+
+    printf("10 + 20 = %d\n", val1);  // Output: 30
+    printf("50 + 70 = %d\n", val2);  // Output: 120
+
+    taskresult_destroy(res1);  // you must free task result object, it will cause memory leak
+    taskresult_destroy(res2);
+
+    threadpool_shutdown(pool);  // pool is now completely terminated
+}
+*/
