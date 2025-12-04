@@ -6,18 +6,16 @@
 * By default, when a Task is pushed, an idle thread is automatically assigned and executed.
 * If necessary, you can be stopped or waited for the task to be completed.
 * 
-* note:
-* This code uses std::result_of, which is deprecated since C++17 and may be removed in future C++ standards.
-* For C++17 and later, consider replacing it with std::invoke_result / std::invoke_result_t.
-* 
 * require:
-* C++11 or over, C++14 (recommand)
+* C++11 or later
 * 
 * ref:
 * https://modoocode.com/285
 */
 #pragma once
 
+#include <iostream>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 #include <queue>
@@ -27,11 +25,28 @@
 #include <algorithm>
 #include <functional>
 #include <future>
+#include <type_traits>
+#include <cassert>
+
+
+// Check C++ version
+#if defined(_MSVC_LANG)
+#define _CPP_VERSION _MSVC_LANG
+#else
+#define _CPP_VERSION __cplusplus
+#endif
 
 class ThreadPool {
 public:
     using Work = std::function<void()>;
     using Task = std::pair<int, Work>;  // pair: {priority, work_function}
+
+    template <typename F, typename... Args>
+#if _CPP_VERSION >= 201703L
+    using return_type_t = typename std::invoke_result<F, Args...>::type;
+#else
+    using return_type_t = typename std::result_of<F(Args...)>::type;
+#endif
 
     static constexpr int DEFAULT_PRIORITY = 0;
 
@@ -59,9 +74,9 @@ public:
     // Enqueue future return task with priority
     template<class F, class... Args>
     auto enqueue(int priority, F&& f, Args&&... args)
-        -> std::future<typename std::result_of<F(Args...)>::type>
+        -> std::future<return_type_t<F, Args...>>
     {
-        using ResultType = typename std::result_of<F(Args...)>::type;
+        using ResultType = return_type_t<F, Args...>;
 
         auto task = std::make_shared<std::packaged_task<ResultType()>>(
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
@@ -82,13 +97,15 @@ public:
     // Enqueue future return task
     template<class F, class... Args>
     auto enqueue(F&& f, Args&&... args)
-        -> std::future<typename std::result_of<F(Args...)>::type>
+        -> std::future<return_type_t<F, Args...>>
     {
         return this->enqueue(DEFAULT_PRIORITY, std::forward<F>(f), std::forward<Args>(args)...);
     }
 
     // Wait until the queue is empty and all running tasks are complete
     void wait() {
+        checkDeadlock("wait");
+
         std::unique_lock<std::mutex> lock(queueMutex_);
 
         waitCV_.wait(lock, [this]() {
@@ -122,6 +139,8 @@ public:
     // Shut down the thread pool and destroy worker threads
     // New thread pool must be used to enable thread again after calling this method
     void shutdown() {
+        checkDeadlock("shutdown");
+
         {   // Lock
             std::unique_lock<std::mutex> lock(queueMutex_);
             stopFlag_.store(true, std::memory_order_release);
@@ -132,7 +151,9 @@ public:
         waitCV_.notify_all();
 
         for (auto& t : threads_) {
-            if (t.joinable()) t.join();
+            if (t.joinable()) {
+                t.join();
+            }
         }
     }
 
@@ -190,6 +211,30 @@ private:
         }
     }
 
+    // Check deadlock by checking if calling self thread
+    void checkDeadlock(const char* callerName) {
+        const std::thread::id this_id = std::this_thread::get_id();
+        bool is_worker = false;
+
+        for (const auto& t : threads_) {
+            if (t.get_id() == this_id) {
+                is_worker = true;
+                break;
+            }
+        }
+
+        if (is_worker) {
+            std::string msg = std::string("ThreadPool::") + callerName +
+                "() cannot be called from a worker thread. This causes a deadlock.";
+#ifndef NDEBUG
+            std::cerr << "Assertion failed: " << msg << std::endl;
+            assert(false && "Deadlock detected");
+#else
+            throw std::logic_error(msg);
+#endif
+        }
+    }
+
     // Main loop for each worker thread
     void workerLoop() {
         while (true) {
@@ -214,10 +259,10 @@ private:
                     work = taskQueue_.top().second;  // copy is heavy
                     //work = std::move(const_cast<Work&>(taskQueue_.top().second));  // const_cast risk
                     taskQueue_.pop();
+
+                    runningTasks_.fetch_add(1, std::memory_order_acquire);
                 } else { continue; }
             }   // Unlock
-
-            runningTasks_.fetch_add(1, std::memory_order_relaxed);
 
             // Execute the task
             try {
@@ -233,7 +278,7 @@ private:
 
                 // Decrement running task count
                 // If this was the last running task, check if we need to notify wait
-                if (runningTasks_.fetch_sub(1, std::memory_order_release) == 1) {
+                if (runningTasks_.fetch_sub(1, std::memory_order_acquire) == 1) {
                     if (taskQueue_.empty()) {
                         waitCV_.notify_all();  // Notify waiting threads (pool is idle)
                     }
