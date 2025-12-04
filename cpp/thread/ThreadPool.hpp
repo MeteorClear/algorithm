@@ -27,6 +27,7 @@
 #include <future>
 #include <type_traits>
 #include <cassert>
+#include <memory>
 
 
 // Check C++ version
@@ -56,18 +57,29 @@ public:
         threadCount_ = (threadCount == 0 || threadCount > hw) ? hw : threadCount;
         threadCount_ = std::max(threadCount_, size_t{1});
 
-        threads_.resize(threadCount_);
+        threads_.reserve(threadCount_);
         stopFlag_.store(false, std::memory_order_release);
         pauseFlag_.store(false, std::memory_order_release);
         runningTasks_ = 0;
 
         // Start worker threads
         for (size_t i = 0; i < threadCount_; ++i) {
-            threads_[i] = std::thread(&ThreadPool::workerLoop, this);
+            threads_.emplace_back(&ThreadPool::workerLoop, this);
         }
+
+        assert(threads_.size() == threadCount_ && "Thread vector size mismatch.");
+        assert(runningTasks_.load() == 0 && "Initial running tasks must be 0.");
     }
     // Destructor
-    ~ThreadPool() { shutdown(); }
+    ~ThreadPool() noexcept { 
+        try {
+            this->terminate();
+        } catch (const std::exception& e) {
+            std::cerr << "[ThreadPool]ERROR: exception in destructor: " << e.what() << '\n';
+        } catch (...) {
+            std::cerr << "[ThreadPool]ERROR: unknown exception in destructor.\n";
+        }
+    }
 
     // -------------------------------- Methods --------------------------------
 
@@ -104,16 +116,20 @@ public:
 
     // Wait until the queue is empty and all running tasks are complete
     void wait() {
-        checkDeadlock("wait");
+        this->checkDeadlock("wait");
 
         std::unique_lock<std::mutex> lock(queueMutex_);
 
         waitCV_.wait(lock, [this]() {
             return taskQueue_.empty() && (runningTasks_.load(std::memory_order_acquire) == 0);
             });
+
+        assert(taskQueue_.empty() && "Wait finished but queue is not empty.");
+        assert(runningTasks_.load(std::memory_order_acquire) == 0 && "Wait finished but tasks are running.");
     }
 
     // Pause the working of tasks
+    // Executed Tasks prior to the call are not interrupted
     void pause() {
         pauseFlag_.store(true, std::memory_order_release);
     }
@@ -125,6 +141,7 @@ public:
     }
 
     // Clear all waiting tasks from the queue
+    // Recommended to use after call pause()
     void clearQueue() {
         std::unique_lock<std::mutex> lock(queueMutex_);
         std::priority_queue<Task, std::vector<Task>, TaskCompare> empty_queue;
@@ -139,7 +156,7 @@ public:
     // Shut down the thread pool and destroy worker threads
     // New thread pool must be used to enable thread again after calling this method
     void shutdown() {
-        checkDeadlock("shutdown");
+        this->checkDeadlock("shutdown");
 
         {   // Lock
             std::unique_lock<std::mutex> lock(queueMutex_);
@@ -157,6 +174,14 @@ public:
         }
     }
 
+    // Helper method for terminate thread
+    // call pause, clearQueue, shutdown
+    void terminate() {
+        this->pause();
+        this->clearQueue();
+        this->shutdown();
+    }
+
     // ----------------------------- Status & Stats -----------------------------
     
     // Return the number of waiting task in queue
@@ -165,7 +190,7 @@ public:
         return taskQueue_.size();
     }
 
-    // Return the number of activate threads
+    // Return the number of active threads
     size_t getThreadCount() const { return threadCount_; }
 
     // Return the number of running tasks
@@ -178,7 +203,7 @@ public:
 
     // Return the status of stop flag
     // true: stopped
-    // flase: active
+    // false: active
     bool isStopped() const {
         return stopFlag_.load(std::memory_order_acquire);
     }
@@ -194,6 +219,8 @@ private:
 
     // Enqueue the task with specific priority into task queue
     inline void queueTask(int priority, Work work_wrapper) {
+        assert(work_wrapper && "Attempted to enqueue an empty task.");
+
         {   // Lock
             std::unique_lock<std::mutex> lock(queueMutex_);
 
@@ -227,7 +254,7 @@ private:
             std::string msg = std::string("ThreadPool::") + callerName +
                 "() cannot be called from a worker thread. This causes a deadlock.";
 #ifndef NDEBUG
-            std::cerr << "Assertion failed: " << msg << std::endl;
+            std::cerr << "[ThreadPool]ERROR:Assertion failed: " << msg << std::endl;
             assert(false && "Deadlock detected");
 #else
             throw std::logic_error(msg);
@@ -260,7 +287,9 @@ private:
                     //work = std::move(const_cast<Work&>(taskQueue_.top().second));  // const_cast risk
                     taskQueue_.pop();
 
-                    runningTasks_.fetch_add(1, std::memory_order_acquire);
+                    assert(work && "Popped empty task from queue.");
+
+                    runningTasks_.fetch_add(1, std::memory_order_release);
                 } else { continue; }
             }   // Unlock
 
@@ -276,9 +305,12 @@ private:
             {   // Lock
                 std::unique_lock<std::mutex> lock(queueMutex_);
 
+                int prevCount = runningTasks_.fetch_sub(1, std::memory_order_release);
+                assert(prevCount > 0 && "Running tasks count underflow");
+
                 // Decrement running task count
                 // If this was the last running task, check if we need to notify wait
-                if (runningTasks_.fetch_sub(1, std::memory_order_acquire) == 1) {
+                if (prevCount == 1) {
                     if (taskQueue_.empty()) {
                         waitCV_.notify_all();  // Notify waiting threads (pool is idle)
                     }
@@ -329,7 +361,7 @@ int main() {
 
     // If you need to get some return value, you can get it using std::future. (also can set priority)
     std::future<int> task_result = pool.enqueue(return_task, 3, 5);
-    task_result.wait()                          // Optional, if you need to ensure task complete
+    task_result.wait();                         // Optional, if you need to ensure task complete
     int result = task_result.get();             // You may get 8 int value(3 + 5)
 
     // If you just want to stop thread running, you should use pool.pause();
